@@ -1,0 +1,6 @@
+{
+  "name": "Termux Code Genius",
+  "description": "Control your Termux terminal with Gemini AI. Code, execute shell commands, and automate tasks on your mobile device through a secure web bridge.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
