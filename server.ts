@@ -4,12 +4,15 @@ import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
 import http from "http";
+import { exec } from "child_process";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
+  app.use(express.json());
   const server = http.createServer(app);
   const PORT = 3000;
 
@@ -17,13 +20,13 @@ async function startServer() {
   const wss = new WebSocketServer({ server });
 
   // Map to store connections by room ID
-  // roomId -> { uiSockets: Set<WebSocket>, agentSockets: Set<WebSocket> }
   const rooms = new Map<string, { uiSockets: Set<WebSocket>, agentSockets: Set<WebSocket> }>();
 
   wss.on("connection", (socket, req) => {
+    // ... existing ws logic ...
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const roomId = url.searchParams.get("room");
-    const role = url.searchParams.get("role"); // 'ui' or 'agent'
+    const role = url.searchParams.get("role");
 
     if (!roomId || !role) {
       socket.close(1008, "Missing room or role");
@@ -37,28 +40,15 @@ async function startServer() {
     const room = rooms.get(roomId)!;
     if (role === "ui") {
       room.uiSockets.add(socket);
-      console.log(`UI connected to room: ${roomId}`);
     } else if (role === "agent") {
       room.agentSockets.add(socket);
-      console.log(`Agent connected to room: ${roomId}`);
-      // Notify UI that agent is connected
       room.uiSockets.forEach(s => s.send(JSON.stringify({ type: "status", data: "agent_connected" })));
     }
 
     socket.on("message", (data) => {
-      let message;
-      try {
-        message = JSON.parse(data.toString());
-      } catch (e) {
-        return;
-      }
-
-      // Relay logic
       if (role === "ui") {
-        // Relay to all agents in the room
         room.agentSockets.forEach(s => s.send(data.toString()));
       } else {
-        // Relay to all UI clients in the room
         room.uiSockets.forEach(s => s.send(data.toString()));
       }
     });
@@ -68,14 +58,40 @@ async function startServer() {
         room.uiSockets.delete(socket);
       } else {
         room.agentSockets.delete(socket);
-        // Notify UI that agent disconnected
         room.uiSockets.forEach(s => s.send(JSON.stringify({ type: "status", data: "agent_disconnected" })));
       }
-      
       if (room.uiSockets.size === 0 && room.agentSockets.size === 0) {
         rooms.delete(roomId);
       }
     });
+  });
+
+  // Direct Execution APIs (for when running locally in Termux)
+  app.post("/api/execute", (req, res) => {
+    const { command } = req.body;
+    if (!command) return res.status(400).json({ error: "Missing command" });
+
+    exec(command, (error, stdout, stderr) => {
+      res.json({
+        output: stdout,
+        error: stderr || (error ? error.message : null)
+      });
+    });
+  });
+
+  app.post("/api/write", (req, res) => {
+    const { path: filePath, content } = req.body;
+    if (!filePath || content === undefined) return res.status(400).json({ error: "Missing path or content" });
+
+    try {
+      const fullPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+      const dir = path.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fullPath, content);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
   });
 
   // API Health check

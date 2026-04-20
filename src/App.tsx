@@ -1,8 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal as TerminalIcon, Send, Copy, Check, Power, AlertCircle, HelpCircle, Code, Cpu, ShieldCheck, Download } from 'lucide-react';
+import { Terminal as TerminalIcon, Send, Copy, Check, Power, AlertCircle, HelpCircle, Code, Cpu, ShieldCheck, Download, LogIn, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTermux, Message, TerminalLine } from './hooks/useTermux';
 import { getGeminiResponse } from './lib/gemini';
+
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 
 export default function App() {
   const { roomId, isConnected, terminalHistory, sendCommand, writeRemoteFile, clearTerminal } = useTermux();
@@ -15,7 +21,71 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'terminal'>('chat');
   const [copied, setCopied] = useState(false);
   const [customHost, setCustomHost] = useState('localhost:3000');
-  
+  const [user, setUser] = useState<{ name: string; email: string; picture: string } | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Load Google Identity Services
+  useEffect(() => {
+    const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId || clientId === "") {
+        console.warn("GOOGLE_CLIENT_ID is missing from environment secrets.");
+        return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleGoogleResponse,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+        renderGoogleButton();
+      } catch (err: any) {
+        setAuthError(err.message);
+      }
+    };
+    document.body.appendChild(script);
+  }, []);
+
+  const renderGoogleButton = () => {
+    const btnContainer = document.getElementById('google-login-btn');
+    if (btnContainer && !user) {
+        window.google.accounts.id.renderButton(
+          btnContainer,
+          { theme: 'outline', size: 'large', shape: 'pill' }
+        );
+    }
+  };
+
+  useEffect(() => {
+    if (!user) {
+        // Re-render button if user logs out
+        setTimeout(renderGoogleButton, 100);
+    }
+  }, [user]);
+
+  const handleGoogleResponse = (response: any) => {
+    try {
+        const payload = JSON.parse(atob(response.credential.split('.')[1]));
+        setUser({
+          name: payload.name,
+          email: payload.email,
+          picture: payload.picture
+        });
+        setAuthError(null);
+    } catch (err) {
+        setAuthError("Failed to decode user information.");
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+  };
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
 
@@ -34,16 +104,40 @@ export default function App() {
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
 
+    // Check if we need auth first
+    if (process.env.VITE_GOOGLE_CLIENT_ID && !user) {
+      setMessages(prev => [...prev, { role: 'model', content: "Please sign in with Google to use the code assistant." }]);
+      return;
+    }
+
     const userMessage: Message = { role: 'user', content: input };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsTyping(true);
 
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
     const response = await getGeminiResponse([...messages, userMessage], async (name, args) => {
       if (name === 'execute_shell_command') {
+        if (isLocal) {
+          const res = await fetch('/api/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: args.command })
+          });
+          return await res.json();
+        }
         const result = await sendCommand(args.command);
         return result;
       } else if (name === 'write_file') {
+        if (isLocal) {
+          const res = await fetch('/api/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: args.path, content: args.content })
+          });
+          return await res.json();
+        }
         const result = await writeRemoteFile(args.path, args.content);
         return result;
       }
@@ -57,77 +151,54 @@ export default function App() {
   const protocol = customHost.includes('localhost') ? 'ws' : 'wss';
   
   const agentScript = `
-import asyncio
-import websockets
-import json
-import subprocess
-import os
+const WebSocket = require('ws');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-ROOM_ID = "${roomId}"
-RE_HOST = "${customHost}"
-WS_URL = f"${protocol}://{RE_HOST}/?room={ROOM_ID}&role=agent"
+const ROOM_ID = "${roomId}";
+const RE_HOST = "${customHost}";
+const WS_URL = "${protocol}://${customHost}/?room=${roomId}&role=agent";
 
-async def run_agent():
-    print(f"Connecting to {WS_URL}...")
-    try:
-        async with websockets.connect(WS_URL) as websocket:
-            print("Connected! Termux Code Genius is ready.")
-            async for message in websocket:
-                data = json.loads(message)
-                if data['type'] == 'execute':
-                    cmd_id = data['data']['id']
-                    command = data['data']['command']
-                    print(f"Executing: {command}")
-                    try:
-                        process = await asyncio.create_subprocess_shell(
-                            command,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
-                        stdout, stderr = await process.communicate()
-                        
-                        response = {
-                            "type": "command_output",
-                            "data": {
-                                "id": cmd_id,
-                                "output": stdout.decode(),
-                                "error": stderr.decode()
-                            }
-                        }
-                        await websocket.send(json.dumps(response))
-                    except Exception as e:
-                        await websocket.send(json.dumps({
-                            "type": "command_output",
-                            "data": { "id": cmd_id, "error": str(e) }
-                        }))
-                elif data['type'] == 'write_file':
-                    file_id = data['data']['id']
-                    file_path = data['data']['path']
-                    content = data['data']['content']
-                    print(f"Writing file: {file_path}")
-                    try:
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                        with open(file_path, "w") as f:
-                            f.write(content)
-                        await websocket.send(json.dumps({
-                            "type": "file_result",
-                            "data": { "id": file_id, "success": True }
-                        }))
-                    except Exception as e:
-                        await websocket.send(json.dumps({
-                            "type": "file_result",
-                            "data": { "id": file_id, "success": False, "error": str(e) }
-                        }))
-    except Exception as e:
-        print(f"Connection error: {e}")
-        print("Check if you are using the correct URL and Room ID.")
+console.log('Connecting to ' + WS_URL + '...');
 
-if __name__ == "__main__":
-    asyncio.run(run_agent())
+const ws = new WebSocket(WS_URL);
+
+ws.on('open', () => {
+  console.log('Connected! Termux Code Genius is ready.');
+});
+
+ws.on('message', (data) => {
+  const msg = JSON.parse(data.toString());
+  if (msg.type === 'execute') {
+    const { id, command } = msg.data;
+    console.log('Executing: ' + command);
+    exec(command, (err, stdout, stderr) => {
+      ws.send(JSON.stringify({ 
+        type: 'command_output', 
+        data: { id, output: stdout, error: stderr || (err ? err.message : '') } 
+      }));
+    });
+  } else if (msg.type === 'write_file') {
+    const { id, path: filePath, content } = msg.data;
+    console.log('Writing file: ' + filePath);
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, content);
+      ws.send(JSON.stringify({ type: 'file_result', data: { id, success: true } }));
+    } catch (e) {
+      ws.send(JSON.stringify({ type: 'file_result', data: { id, success: false, error: e.message } }));
+    }
+  }
+});
+
+ws.on('error', (err) => console.error('Connection error:', err.message));
+ws.on('close', () => console.log('Disconnected.'));
 `.trim();
 
   const copyScript = () => {
-    navigator.clipboard.writeText(`pkg install python -y && pip install websockets\ncat > agent.py <<EOF\n${agentScript}\nEOF\npython agent.py`);
+    navigator.clipboard.writeText(`pkg install nodejs -y && npm install ws\ncat > agent.js <<EOF\n${agentScript}\nEOF\nnode agent.js`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -168,9 +239,9 @@ if __name__ == "__main__":
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     Step 1: Install Requirements
                   </div>
-                  <p className="text-gray-400 text-sm mb-3">Ensure you have Python and common tools installed in Termux.</p>
+                  <p className="text-gray-400 text-sm mb-3">Ensure you have Node.js and common tools installed in Termux.</p>
                   <div className="bg-[#151821] p-3 rounded font-mono text-xs text-blue-300 border border-[#1C1F26]">
-                    pkg install python -y && pip install websockets
+                    pkg install nodejs -y && npm install ws
                   </div>
                 </section>
 
@@ -200,7 +271,7 @@ if __name__ == "__main__":
 
                   <div className="relative">
                     <div className="bg-[#151821] p-3 rounded font-mono text-xs text-gray-300 border border-[#1C1F26] h-32 overflow-y-auto break-all scrollbar-hide">
-                      {`cat > agent.py <<EOF\n${agentScript}\nEOF\npython agent.py`}
+                      {`cat > agent.js <<EOF\n${agentScript}\nEOF\nnode agent.js`}
                     </div>
                     <button 
                       onClick={copyScript}
@@ -259,11 +330,46 @@ if __name__ == "__main__":
                 <span className="text-[10px] md:text-xs font-mono text-gray-300">{roomId}</span>
              </div>
              <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
-             <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
-                <span className="font-bold text-xs">U</span>
-             </div>
+             
+             {user ? (
+               <div className="flex items-center gap-2 md:gap-3">
+                 <div className="hidden md:flex flex-col items-end">
+                    <span className="text-[10px] text-white font-bold">{user.name}</span>
+                    <button 
+                        onClick={handleLogout}
+                        className="text-[8px] text-red-500 hover:text-red-400 uppercase font-bold tracking-widest"
+                    >
+                        Sign Out
+                    </button>
+                 </div>
+                 <img 
+                   src={user.picture} 
+                   alt={user.name} 
+                   className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 border-blue-500 shadow-lg shrink-0" 
+                   referrerPolicy="no-referrer"
+                 />
+               </div>
+             ) : (
+               <div className="flex flex-col items-center">
+                 {!process.env.VITE_GOOGLE_CLIENT_ID && (
+                   <span className="text-[8px] text-amber-500 font-bold mb-1 uppercase">Client ID missing</span>
+                 )}
+                 <div id="google-login-btn" className="shrink-0 scale-75 md:scale-100" />
+               </div>
+             )}
           </div>
         </header>
+
+        {/* Local Mode Banner */}
+        {window.location.hostname === 'localhost' && (
+          <div className="bg-emerald-900/30 border-b border-emerald-500/30 px-4 py-2 flex items-center justify-between text-[10px] md:text-sm">
+            <span className="flex items-center gap-2 text-emerald-400">
+              <ShieldCheck className="w-4 h-4" />
+              Running in Local Mode (Termux)
+            </span>
+            <span className="text-emerald-500 font-mono">Commands execute directly on this device</span>
+          </div>
+        )}
 
         {/* Layout: Messages & Terminal */}
         <main className="flex-1 flex overflow-hidden relative">
