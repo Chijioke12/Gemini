@@ -63,7 +63,7 @@ ROOM_ID = "${roomId}"
 RE_URL = "${window.location.host}"
 WS_URL = f"ws://{RE_URL}/?room={ROOM_ID}&role=agent"
 
-async function run_agent():
+async def run_agent():
     print(f"Connecting to {WS_URL}...")
     async with websockets.connect(WS_URL) as websocket:
         print("Connected! Termux Code Genius is ready.")
