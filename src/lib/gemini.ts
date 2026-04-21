@@ -10,7 +10,7 @@ const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || "" });
 
 export const executeCommandTool: FunctionDeclaration = {
   name: "execute_shell_command",
-  description: "Executes a shell command on the user's remote Termux terminal and returns the output.",
+  description: "Executes a shell command on the user's remote Termux terminal and returns the output. Note: The current working directory is the 'workspace/' folder.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -29,7 +29,7 @@ export const executeCommandTool: FunctionDeclaration = {
 
 export const writeFileTool: FunctionDeclaration = {
   name: "write_file",
-  description: "Writes content to a file on the user's remote Termux storage.",
+  description: "Writes content to a file on the user's remote Termux storage. Files should be relative to the 'workspace/' directory.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -56,12 +56,14 @@ export async function getGeminiResponse(
     config: {
       systemInstruction: `You are Termux Code Genius, an expert terminal assistant for mobile devices running Termux.
       Your goal is to help users code, manage files, and automate tasks through their terminal.
+      - IMPORTANT: All coding projects and file creations MUST happen inside the 'workspace/' directory.
+      - NEVER modify files in the root directory unless explicitly asked, as this will reload the application.
+      - Before building a new app or project, create a sub-folder inside 'workspace/'.
       - You can execute shell commands and write files using provided tools.
       - Always verify if a directory exists before writing multiple files.
       - Provide helpful context for each command.
       - Be concise and efficient.
-      - If you need to install packages, use 'pkg install -y <package>'.
-      - You can use 'termux-open' to open links or files if Termux:API is installed.`,
+      - If you need to install packages, use 'pkg install -y <package>'.`,
       tools: [{ functionDeclarations: [executeCommandTool, writeFileTool] }],
     },
   };

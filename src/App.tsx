@@ -105,6 +105,9 @@ const ROOM_ID = "${roomId}";
 const RE_HOST = "${customHost}";
 const WS_URL = "${protocol}://${customHost}/?room=${roomId}&role=agent";
 
+const WORKSPACE_DIR = path.join(process.cwd(), 'workspace');
+if (!fs.existsSync(WORKSPACE_DIR)) fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+
 console.log('Connecting to ' + WS_URL + '...');
 
 const ws = new WebSocket(WS_URL);
@@ -117,8 +120,8 @@ ws.on('message', (data) => {
   const msg = JSON.parse(data.toString());
   if (msg.type === 'execute') {
     const { id, command } = msg.data;
-    console.log('Executing: ' + command);
-    exec(command, (err, stdout, stderr) => {
+    console.log('Executing in workspace: ' + command);
+    exec(command, { cwd: WORKSPACE_DIR }, (err, stdout, stderr) => {
       ws.send(JSON.stringify({ 
         type: 'command_output', 
         data: { id, output: stdout, error: stderr || (err ? err.message : '') } 
@@ -126,11 +129,12 @@ ws.on('message', (data) => {
     });
   } else if (msg.type === 'write_file') {
     const { id, path: filePath, content } = msg.data;
-    console.log('Writing file: ' + filePath);
+    console.log('Writing file to workspace: ' + filePath);
     try {
-      const dir = path.dirname(filePath);
+      const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
+      const dir = path.dirname(fullPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(filePath, content);
+      fs.writeFileSync(fullPath, content);
       ws.send(JSON.stringify({ type: 'file_result', data: { id, success: true } }));
     } catch (e) {
       ws.send(JSON.stringify({ type: 'file_result', data: { id, success: false, error: e.message } }));

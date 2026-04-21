@@ -67,11 +67,14 @@ async function startServer() {
   });
 
   // Direct Execution APIs (for when running locally in Termux)
+  const WORKSPACE_DIR = path.join(process.cwd(), 'workspace');
+  if (!fs.existsSync(WORKSPACE_DIR)) fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+
   app.post("/api/execute", (req, res) => {
     const { command } = req.body;
     if (!command) return res.status(400).json({ error: "Missing command" });
 
-    exec(command, (error, stdout, stderr) => {
+    exec(command, { cwd: WORKSPACE_DIR }, (error, stdout, stderr) => {
       res.json({
         output: stdout,
         error: stderr || (error ? error.message : null)
@@ -84,7 +87,13 @@ async function startServer() {
     if (!filePath || content === undefined) return res.status(400).json({ error: "Missing path or content" });
 
     try {
-      const fullPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+      const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
+      
+      // Safety check: ensure path is within workspace
+      if (!fullPath.startsWith(WORKSPACE_DIR)) {
+        return res.status(403).json({ error: "Forbidden: Path must be inside workspace/" });
+      }
+
       const dir = path.dirname(fullPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(fullPath, content);
