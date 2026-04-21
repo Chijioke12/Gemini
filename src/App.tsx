@@ -204,7 +204,7 @@ ws.on('close', () => console.log('Disconnected.'));
 `.trim();
 
   const copyScript = () => {
-    navigator.clipboard.writeText(`pkg install nodejs -y && npm install ws\ncat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`);
+    navigator.clipboard.writeText(`pkg install nodejs -y && npm install ws\nrm -f agent.js\ncat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -277,7 +277,7 @@ ws.on('close', () => console.log('Disconnected.'));
 
                   <div className="relative">
                     <div className="bg-[#151821] p-3 rounded font-mono text-xs text-gray-300 border border-[#1C1F26] h-32 overflow-y-auto break-all scrollbar-hide">
-                      {`cat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`}
+                      {`rm -f agent.js\ncat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`}
                     </div>
                     <button 
                       onClick={copyScript}
