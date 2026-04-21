@@ -270,12 +270,13 @@ ws.on('close', () => console.log('Disconnected.'));
           </div>
           
           <div className="flex items-center gap-2 md:gap-4 ml-auto">
-             <div className="hidden sm:flex flex-col items-end">
-                <span className="text-[8px] md:text-[10px] text-gray-500 uppercase font-bold">Model</span>
+             {/* Model Selector - Always visible */}
+             <div className="flex flex-col items-end">
+                <span className="text-[7px] md:text-[10px] text-gray-400 uppercase font-bold">Model</span>
                 <select 
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
-                  className="bg-transparent text-[10px] md:text-sm font-mono text-gray-300 border-none focus:ring-0 cursor-pointer text-right appearance-none hover:text-white transition-colors"
+                  className="bg-transparent text-[10px] md:text-sm font-mono text-blue-400 border-none focus:ring-0 cursor-pointer text-right appearance-none hover:text-blue-300 transition-colors p-0"
                 >
                   <option value="gemini-3.1-pro-preview" className="bg-[#0A0C10]">3.1 Pro</option>
                   <option value="gemini-3-flash-preview" className="bg-[#0A0C10]">3.0 Flash</option>
@@ -284,13 +285,15 @@ ws.on('close', () => console.log('Disconnected.'));
                   <option value="gemini-flash-latest" className="bg-[#0A0C10]">1.5 Flash</option>
                 </select>
              </div>
+             
              <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
              
+             {/* Session ID - Hidden on very small screens */}
              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-[8px] md:text-[10px] text-gray-500 uppercase font-bold">Session</span>
-                <span className="text-[10px] md:text-xs font-mono text-gray-300">{roomId}</span>
+                <span className="text-[7px] md:text-[10px] text-gray-500 uppercase font-bold">Session</span>
+                <span className="text-[9px] md:text-xs font-mono text-gray-300">{roomId}</span>
              </div>
-             <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
+             <div className="hidden sm:block h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
              
              <div className="flex items-center gap-2 md:gap-3">
                <div className="hidden md:flex flex-col items-end font-bold">
@@ -298,7 +301,7 @@ ws.on('close', () => console.log('Disconnected.'));
                   <span className="text-[10px] text-white uppercase">{isConnected || window.location.hostname === 'localhost' ? 'Ready' : 'Offline'}</span>
                </div>
                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#1C1F26] flex items-center justify-center border border-[#2A2E38]">
-                  <User className="w-5 h-5 text-gray-500" />
+                  <User className="w-4 h-4 md:w-5 md:h-5 text-gray-500" />
                </div>
              </div>
           </div>
