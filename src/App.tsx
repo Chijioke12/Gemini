@@ -36,16 +36,22 @@ export default function App() {
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.onload = () => {
-      try {
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: handleGoogleResponse,
-          auto_select: false,
-          cancel_on_tap_outside: true,
-        });
-        renderGoogleButton();
-      } catch (err: any) {
-        setAuthError(err.message);
+      if (window.google && window.google.accounts) {
+        try {
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: handleGoogleResponse,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+          });
+          renderGoogleButton();
+        } catch (err: any) {
+          console.error("Google Auth Init Error:", err);
+          setAuthError(err.message);
+        }
+      } else {
+        console.error("Google Identity Services script loaded but objects are missing.");
+        setAuthError("Auth library failed to initialize.");
       }
     };
     document.body.appendChild(script);
@@ -198,7 +204,7 @@ ws.on('close', () => console.log('Disconnected.'));
 `.trim();
 
   const copyScript = () => {
-    navigator.clipboard.writeText(`pkg install nodejs -y && npm install ws\ncat > agent.js <<EOF\n${agentScript}\nEOF\nnode agent.js`);
+    navigator.clipboard.writeText(`pkg install nodejs -y && npm install ws\ncat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -250,7 +256,7 @@ ws.on('close', () => console.log('Disconnected.'));
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     Step 2: Run Bridge Agent
                   </div>
-                  <p className="text-gray-400 text-sm mb-3">Copy and paste this command into your Termux terminal to start the bridge.</p>
+                  <p className="text-gray-400 text-sm mb-3">Copy and paste this command into your Termux terminal to start the bridge (we use <code className="text-blue-400">.cjs</code> for compatibility).</p>
                   
                   <div className="mb-4">
                     <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1 block">Bridge Host URL</label>
@@ -271,7 +277,7 @@ ws.on('close', () => console.log('Disconnected.'));
 
                   <div className="relative">
                     <div className="bg-[#151821] p-3 rounded font-mono text-xs text-gray-300 border border-[#1C1F26] h-32 overflow-y-auto break-all scrollbar-hide">
-                      {`cat > agent.js <<EOF\n${agentScript}\nEOF\nnode agent.js`}
+                      {`cat > agent.cjs <<EOF\n${agentScript}\nEOF\nnode agent.cjs`}
                     </div>
                     <button 
                       onClick={copyScript}
