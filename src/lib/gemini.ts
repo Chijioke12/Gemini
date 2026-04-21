@@ -107,6 +107,6 @@ export async function getGeminiResponse(
     return currentResponse.text;
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Error: " + (error instanceof Error ? error.message : "Internal AI Error");
+    throw error;
   }
 }

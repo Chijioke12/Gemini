@@ -21,76 +21,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'terminal'>('chat');
   const [copied, setCopied] = useState(false);
   const [customHost, setCustomHost] = useState('localhost:3000');
-  const [user, setUser] = useState<{ name: string; email: string; picture: string } | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
-
-  // Load Google Identity Services
-  useEffect(() => {
-    const clientId = process.env.VITE_GOOGLE_CLIENT_ID;
-    if (!clientId || clientId === "") {
-        console.warn("GOOGLE_CLIENT_ID is missing from environment secrets.");
-        return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.onload = () => {
-      if (window.google && window.google.accounts) {
-        try {
-          window.google.accounts.id.initialize({
-            client_id: clientId,
-            callback: handleGoogleResponse,
-            auto_select: false,
-            cancel_on_tap_outside: true,
-          });
-          renderGoogleButton();
-        } catch (err: any) {
-          console.error("Google Auth Init Error:", err);
-          setAuthError(err.message);
-        }
-      } else {
-        console.error("Google Identity Services script loaded but objects are missing.");
-        setAuthError("Auth library failed to initialize.");
-      }
-    };
-    document.body.appendChild(script);
-  }, []);
-
-  const renderGoogleButton = () => {
-    const btnContainer = document.getElementById('google-login-btn');
-    if (btnContainer && !user) {
-        window.google.accounts.id.renderButton(
-          btnContainer,
-          { theme: 'outline', size: 'large', shape: 'pill' }
-        );
-    }
-  };
-
-  useEffect(() => {
-    if (!user) {
-        // Re-render button if user logs out
-        setTimeout(renderGoogleButton, 100);
-    }
-  }, [user]);
-
-  const handleGoogleResponse = (response: any) => {
-    try {
-        const payload = JSON.parse(atob(response.credential.split('.')[1]));
-        setUser({
-          name: payload.name,
-          email: payload.email,
-          picture: payload.picture
-        });
-        setAuthError(null);
-    } catch (err) {
-        setAuthError("Failed to decode user information.");
-    }
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -110,12 +40,6 @@ export default function App() {
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
 
-    // Check if we need auth first
-    if (process.env.VITE_GOOGLE_CLIENT_ID && !user) {
-      setMessages(prev => [...prev, { role: 'model', content: "Please sign in with Google to use the code assistant." }]);
-      return;
-    }
-
     const userMessage: Message = { role: 'user', content: input };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
@@ -123,35 +47,45 @@ export default function App() {
 
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-    const response = await getGeminiResponse([...messages, userMessage], async (name, args) => {
-      if (name === 'execute_shell_command') {
-        if (isLocal) {
-          const res = await fetch('/api/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: args.command })
-          });
-          return await res.json();
+    try {
+      const response = await getGeminiResponse([...messages, userMessage], async (name, args) => {
+        if (name === 'execute_shell_command') {
+          if (isLocal) {
+            const res = await fetch('/api/execute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ command: args.command })
+            });
+            return await res.json();
+          }
+          const result = await sendCommand(args.command);
+          return result;
+        } else if (name === 'write_file') {
+          if (isLocal) {
+            const res = await fetch('/api/write', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: args.path, content: args.content })
+            });
+            return await res.json();
+          }
+          const result = await writeRemoteFile(args.path, args.content);
+          return result;
         }
-        const result = await sendCommand(args.command);
-        return result;
-      } else if (name === 'write_file') {
-        if (isLocal) {
-          const res = await fetch('/api/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: args.path, content: args.content })
-          });
-          return await res.json();
-        }
-        const result = await writeRemoteFile(args.path, args.content);
-        return result;
-      }
-      return { error: 'Unknown tool' };
-    });
+        return { error: 'Unknown tool' };
+      });
 
-    setMessages(prev => [...prev, { role: 'model', content: response || "" }]);
-    setIsTyping(false);
+      setMessages(prev => [...prev, { role: 'model', content: response || "" }]);
+    } catch (error: any) {
+      console.error("Chat Error:", error);
+      let errorMsg = "Something went wrong. Please try again.";
+      if (error?.message?.includes('429') || error?.message?.includes('quota')) {
+        errorMsg = "API Quota exceeded. Please wait a moment before trying again (Free tier limits apply).";
+      }
+      setMessages(prev => [...prev, { role: 'model', content: errorMsg }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const protocol = customHost.includes('localhost') ? 'ws' : 'wss';
@@ -337,32 +271,14 @@ ws.on('close', () => console.log('Disconnected.'));
              </div>
              <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
              
-             {user ? (
-               <div className="flex items-center gap-2 md:gap-3">
-                 <div className="hidden md:flex flex-col items-end">
-                    <span className="text-[10px] text-white font-bold">{user.name}</span>
-                    <button 
-                        onClick={handleLogout}
-                        className="text-[8px] text-red-500 hover:text-red-400 uppercase font-bold tracking-widest"
-                    >
-                        Sign Out
-                    </button>
-                 </div>
-                 <img 
-                   src={user.picture} 
-                   alt={user.name} 
-                   className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 border-blue-500 shadow-lg shrink-0" 
-                   referrerPolicy="no-referrer"
-                 />
+             <div className="flex items-center gap-2 md:gap-3">
+               <div className="hidden md:flex flex-col items-end">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase">Guest</span>
                </div>
-             ) : (
-               <div className="flex flex-col items-center">
-                 {!process.env.VITE_GOOGLE_CLIENT_ID && (
-                   <span className="text-[8px] text-amber-500 font-bold mb-1 uppercase">Client ID missing</span>
-                 )}
-                 <div id="google-login-btn" className="shrink-0 scale-75 md:scale-100" />
+               <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#1C1F26] flex items-center justify-center border border-[#2A2E38]">
+                  <User className="w-5 h-5 text-gray-500" />
                </div>
-             )}
+             </div>
           </div>
         </header>
 
@@ -493,8 +409,8 @@ ws.on('close', () => console.log('Disconnected.'));
             <div className="p-3 border-t border-[#1C1F26] bg-[#0A0C10]">
               <div className="flex items-center justify-between text-[8px] md:text-[10px] text-gray-500 font-mono">
                 <div className="flex items-center gap-1">
-                  <span className={`w-1 h-1 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  {isConnected ? 'READY' : 'OFFLINE'}
+                  <span className={`w-1 h-1 rounded-full ${isConnected || window.location.hostname === 'localhost' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {isConnected || window.location.hostname === 'localhost' ? 'READY' : 'OFFLINE'}
                 </div>
                 <span>ROOM: {roomId}</span>
               </div>
