@@ -21,6 +21,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'terminal'>('chat');
   const [copied, setCopied] = useState(false);
   const [customHost, setCustomHost] = useState('localhost:3000');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.1-pro-preview');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -48,32 +49,36 @@ export default function App() {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
     try {
-      const response = await getGeminiResponse([...messages, userMessage], async (name, args) => {
-        if (name === 'execute_shell_command') {
-          if (isLocal) {
-            const res = await fetch('/api/execute', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command: args.command })
-            });
-            return await res.json();
+      const response = await getGeminiResponse(
+        [...messages, userMessage], 
+        async (name, args) => {
+          if (name === 'execute_shell_command') {
+            if (isLocal) {
+              const res = await fetch('/api/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: args.command })
+              });
+              return await res.json();
+            }
+            const result = await sendCommand(args.command);
+            return result;
+          } else if (name === 'write_file') {
+            if (isLocal) {
+              const res = await fetch('/api/write', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: args.path, content: args.content })
+              });
+              return await res.json();
+            }
+            const result = await writeRemoteFile(args.path, args.content);
+            return result;
           }
-          const result = await sendCommand(args.command);
-          return result;
-        } else if (name === 'write_file') {
-          if (isLocal) {
-            const res = await fetch('/api/write', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: args.path, content: args.content })
-            });
-            return await res.json();
-          }
-          const result = await writeRemoteFile(args.path, args.content);
-          return result;
-        }
-        return { error: 'Unknown tool' };
-      });
+          return { error: 'Unknown tool' };
+        },
+        selectedModel
+      );
 
       setMessages(prev => [...prev, { role: 'model', content: response || "" }]);
     } catch (error: any) {
@@ -264,7 +269,23 @@ ws.on('close', () => console.log('Disconnected.'));
             </div>
           </div>
           
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-4 ml-auto">
+             <div className="hidden sm:flex flex-col items-end">
+                <span className="text-[8px] md:text-[10px] text-gray-500 uppercase font-bold">Model</span>
+                <select 
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-transparent text-[10px] md:text-sm font-mono text-gray-300 border-none focus:ring-0 cursor-pointer text-right appearance-none hover:text-white transition-colors"
+                >
+                  <option value="gemini-3.1-pro-preview" className="bg-[#0A0C10]">3.1 Pro</option>
+                  <option value="gemini-3-flash-preview" className="bg-[#0A0C10]">3.0 Flash</option>
+                  <option value="gemini-3.1-flash-lite-preview" className="bg-[#0A0C10]">3.1 Lite</option>
+                  <option value="gemini-2.5-flash-image" className="bg-[#0A0C10]">2.5 Flash</option>
+                  <option value="gemini-flash-latest" className="bg-[#0A0C10]">1.5 Flash</option>
+                </select>
+             </div>
+             <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
+             
              <div className="hidden sm:flex flex-col items-end">
                 <span className="text-[8px] md:text-[10px] text-gray-500 uppercase font-bold">Session</span>
                 <span className="text-[10px] md:text-xs font-mono text-gray-300">{roomId}</span>
@@ -272,8 +293,9 @@ ws.on('close', () => console.log('Disconnected.'));
              <div className="h-6 md:h-8 w-[1px] bg-[#1C1F26]" />
              
              <div className="flex items-center gap-2 md:gap-3">
-               <div className="hidden md:flex flex-col items-end">
-                  <span className="text-[10px] text-gray-500 font-bold uppercase">Guest</span>
+               <div className="hidden md:flex flex-col items-end font-bold">
+                  <span className="text-[8px] text-emerald-500 uppercase">Status</span>
+                  <span className="text-[10px] text-white uppercase">{isConnected || window.location.hostname === 'localhost' ? 'Ready' : 'Offline'}</span>
                </div>
                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#1C1F26] flex items-center justify-center border border-[#2A2E38]">
                   <User className="w-5 h-5 text-gray-500" />

@@ -48,12 +48,11 @@ export const writeFileTool: FunctionDeclaration = {
 
 export async function getGeminiResponse(
   messages: any[],
-  onFunctionCall: (name: string, args: any) => Promise<any>
+  onFunctionCall: (name: string, args: any) => Promise<any>,
+  modelName: string = "gemini-3.1-pro-preview"
 ) {
-  const model = "gemini-3.1-pro-preview"; // Use Pro for coding tasks
-  
   const chatConfig = {
-    model,
+    model: modelName,
     config: {
       systemInstruction: `You are Termux Code Genius, an expert terminal assistant for mobile devices running Termux.
       Your goal is to help users code, manage files, and automate tasks through their terminal.
